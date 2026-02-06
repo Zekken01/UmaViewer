@@ -69,7 +69,6 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     public MorphRecorder morphRecorderSaved;
 
     private UmaContainer container;
-    float aposeDegress = 38.5f;
 
     public bool IsLive;
     public bool ExportEnglishBoneNames = true;
@@ -149,8 +148,6 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         characterContainer.ResetBodyPose();
         characterContainer.UpBodyReset();
 
-        BoneDictionary[BoneNames.左腕].Rotate(0, 0, -aposeDegress);
-        BoneDictionary[BoneNames.右腕].Rotate(0, 0, aposeDegress);
 
         SetInitialPositionAndRotation();
 
@@ -175,8 +172,6 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         boneGhost = new BoneGhost(BoneDictionary, UseBottomCenter);
         morphRecorder = new MorphRecorder(transform);
 
-        BoneDictionary[BoneNames.左腕].Rotate(0, 0, aposeDegress);
-        BoneDictionary[BoneNames.右腕].Rotate(0, 0, -aposeDegress);
         animator.enabled = true;
         animator.Play(state.shortNameHash, 0, state.normalizedTime);
     }
