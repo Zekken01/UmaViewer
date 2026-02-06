@@ -18,6 +18,7 @@ public class UnityCameraVMDRecorder : MonoBehaviour
     public bool IgnoreInitialRotation;
     public Vector3 Offset = Vector3.zero;
     public int KeyReductionLevel = 2;
+    public bool ExportEnglishBoneNames = true;
     public List<Vector3> LocalPositions { get; private set; } = new List<Vector3>();
     public List<Vector3> LocalRotations { get; private set; } = new List<Vector3>();
 
@@ -375,6 +376,9 @@ public class UnityCameraVMDRecorder : MonoBehaviour
                 {
                     const int boneNameLength = 15;
                     string boneNameString = "全ての親";
+
+                    // Always export English bone names for live camera frames
+                    boneNameString = BoneNameMap.GetEnglish(boneNameString, boneNameString);
 
                     byte[] boneNameBytes = System.Text.Encoding.GetEncoding(ShiftJIS).GetBytes(boneNameString);
                     binaryWriter.Write(boneNameBytes, 0, boneNameBytes.Length);

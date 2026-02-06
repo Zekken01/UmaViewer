@@ -72,6 +72,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     float aposeDegress = 38.5f;
 
     public bool IsLive;
+    public bool ExportEnglishBoneNames = true;
     public void Initialize()
     {
         Time.fixedDeltaTime = FPSs;
@@ -477,6 +478,11 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                     if (boneName == BoneNames.センター && UseCenterAsParentOfAll)
                     {
                         boneNameString = GrooveNameString;
+                    }
+
+                    if (ExportEnglishBoneNames)
+                    {
+                        boneNameString = BoneNameMap.GetEnglish(boneNameString, boneNameString);
                     }
 
                     byte[] boneNameBytes = System.Text.Encoding.GetEncoding(ShiftJIS).GetBytes(boneNameString);
