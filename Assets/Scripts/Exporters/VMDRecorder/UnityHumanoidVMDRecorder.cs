@@ -4,6 +4,8 @@ using System.IO;
 using System;
 using System.Linq;
 using Gallop;
+using UnityEngine.Playables;
+using UnityEngine.Animations;
 
 //初期ポーズ(T,Aポーズ)の時点でアタッチ、有効化されている必要がある
 public class UnityHumanoidVMDRecorder : MonoBehaviour
@@ -35,6 +37,8 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     const string CenterNameString = "センター";
     const string GrooveNameString = "グルーブ";
 
+    public bool ExportEachClipSeparately = false;
+    public Animator ExportAnimator = null;
     public enum BoneNames
     {
         全ての親, センター, 左足ＩＫ, 右足ＩＫ, 上半身, 上半身2, 首, 頭,
@@ -358,6 +362,8 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
         IsRecording = true;
         IsLive = islive;
 
+        FrameNumber = 0;
+        visitableDictionary = new Dictionary<int, bool>();
         if (islive)
         {
             var director = Gallop.Live.Director.instance;
@@ -409,13 +415,13 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     {
         if (IsRecording)
         {
-            Debug.Log(transform.name + "VMD保存前にレコーディングをストップしてください。");
+            UnityEngine.Debug.Log(transform.name + "VMD保存前にレコーディングをストップしてください。");
             return;
         }
 
         if (KeyReductionLevel <= 0) { KeyReductionLevel = 1; }
 
-        Debug.Log(transform.name + "VMDファイル作成開始");
+        UnityEngine.Debug.Log(transform.name + "VMDファイル作成開始");
         //ファイルの書き込み
         using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
         using (BinaryWriter binaryWriter = new BinaryWriter(fileStream))
@@ -509,7 +515,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                 });
 
                 //全モーフフレーム数の書き込み
-                morphRecorderSaved.DisableIntron();
+                // morphRecorderSaved.DisableIntron();
                 if (TrimMorphNumber) { morphRecorderSaved.TrimMorphNumber(); }
                 void LoopWithMorphCondition(Action<string, int> action)
                 {
@@ -520,11 +526,11 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                             if (morphRecorderSaved.MorphDrivers[morphName].ValueList.Count == 0) { continue; }
                             if (i > morphRecorderSaved.MorphDrivers[morphName].ValueList.Count) { continue; }
                             //変化のない部分は省く
-                            if (!morphRecorderSaved.MorphDrivers[morphName].ValueList[i].enabled) { continue; }
+                            //if (!morphRecorderSaved.MorphDrivers[morphName].ValueList[i].enabled) { continue; }
                             const int boneNameLength = 15;
                             string morphNameString = morphName.ToString();
                             byte[] morphNameBytes = System.Text.Encoding.GetEncoding(ShiftJIS).GetBytes(morphNameString);
-                            //名前が長過ぎた場合書き込まない
+                            //名前が長すぎたとき書き込まない
                             if (boneNameLength - morphNameBytes.Length < 0) { continue; }
 
                             action(morphName, i);
@@ -604,7 +610,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
             }
             catch (Exception ex)
             {
-                Debug.Log("VMD書き込みエラー" + ex.Message);
+                UnityEngine.Debug.Log("VMD書き込みエラー" + ex.Message);
             }
             finally
             {
@@ -626,22 +632,314 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
     /// 呼び出す際は先にStopRecordingを呼び出すこと
     /// </summary>
     /// <param name="modelName">VMDファイルに記載される専用モデル名</param>
-    /// <param name="filePath">保存先の絶対ファイルパス</param>
     /// <param name="keyReductionLevel">キーの書き込み頻度を減らして容量を減らす</param>
     public void SaveVMD(string modelName, int keyReductionLevel = 3)
     {
-        string fileName = $"{Application.dataPath}{FileSavePath}/{string.Format("UMA_{0}.vmd", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"))}";
-        Directory.CreateDirectory(Application.dataPath + FileSavePath);
+        string fileName = $"{UnityEngine.Application.dataPath}{FileSavePath}/{string.Format("UMA_{0}.vmd", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"))}";
+        Directory.CreateDirectory(UnityEngine.Application.dataPath + FileSavePath);
         KeyReductionLevel = keyReductionLevel;
         SaveVMD(modelName, fileName);
     }
 
     public void SaveLiveVMD(LiveEntry liveEntry, DateTime time ,string modelName, int keyReductionLevel = 3)
     {
-        string fileName = $"{Application.dataPath}{FileSavePath}/Live{liveEntry.MusicId}_{time.ToString("yyyy-MM-dd_HH-mm-ss")}/{modelName}.vmd";
+        string fileName = $"{UnityEngine.Application.dataPath}{FileSavePath}/Live{liveEntry.MusicId}_{time.ToString("yyyy-MM-dd_HH-mm-ss")}/{modelName}.vmd";
         Directory.CreateDirectory(Path.GetDirectoryName(fileName));
         KeyReductionLevel = keyReductionLevel;
         SaveVMD(modelName, fileName);
+    }
+
+    /// <summary>
+    /// Exports each AnimationClip referenced by the runtime animator controller as its own .vmd file.
+    /// If folder is null, creates a folder under Application.dataPath + FileSavePath with controller name + timestamp.
+    /// This uses the existing recording pipeline (StartRecording/SaveFrame/StopRecording/SaveVMD).
+    /// </summary>
+    /// <param name="folder">Absolute folder path (if null, default inside Application.dataPath + FileSavePath)</param>
+    /// <param name="keyReductionLevel">Key reduction level to use for saved VMDs</param>
+    public void ExportControllerClipsToVMD(string folder = null, int keyReductionLevel = 3)
+    {
+        if (!ExportEachClipSeparately)
+        {
+            UnityEngine.Debug.Log("ExportEachClipSeparately is disabled. Toggle ExportEachClipSeparately = true to enable.");
+            return;
+        }
+
+        var characterContainer = GetComponentInParent<UmaContainerCharacter>();
+        Animator animator = ExportAnimator != null ? ExportAnimator : (characterContainer != null ? characterContainer.UmaAnimator : null);
+        if (animator == null)
+        {
+            UnityEngine.Debug.LogError("No Animator available for VMD export.");
+            return;
+        }
+
+        var rac = animator.runtimeAnimatorController;
+        if (rac == null)
+        {
+            UnityEngine.Debug.LogError("Animator.runtimeAnimatorController is null. Cannot export clips.");
+            return;
+        }
+
+        var clips = rac.animationClips;
+        if (clips == null || clips.Length == 0)
+        {
+            UnityEngine.Debug.Log("No animation clips found in runtime animator controller.");
+            return;
+        }
+
+        string baseFolder;
+        if (string.IsNullOrEmpty(folder))
+        {
+            baseFolder = $"{UnityEngine.Application.dataPath}{FileSavePath}/{rac.name}_{DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss")}";
+        }
+        else
+        {
+            baseFolder = folder;
+        }
+
+        Directory.CreateDirectory(baseFolder);
+
+        foreach (var clip in clips)
+        {
+            if (clip == null) continue;
+
+            UnityEngine.Debug.Log($"Starting export for clip: {clip.name}");
+
+            KeyReductionLevel = keyReductionLevel;
+            StartRecording(false);
+
+            PlayableGraph graph = PlayableGraph.Create($"VMDExport_{clip.name}");
+            var playable = AnimationClipPlayable.Create(graph, clip);
+            var output = AnimationPlayableOutput.Create(graph, "VMDExport", animator);
+            output.SetSourcePlayable(playable);
+            graph.Play();
+
+            try
+            {
+                int samples = Mathf.Max(1, Mathf.CeilToInt(clip.length * Mathf.Max(1f, clip.frameRate)));
+                float sampleInterval = 1f / Mathf.Max(1f, clip.frameRate);
+
+                for (int s = 0; s < samples; s++)
+                {
+                    float t = s * sampleInterval;
+                    t = Mathf.Min(t, Mathf.Max(0f, clip.length - Mathf.Epsilon));
+                    playable.SetTime(t);
+
+                    graph.Evaluate(0f);
+
+                    SaveFrame();
+                    FrameNumber++;
+                }
+            }
+            finally
+            {
+                graph.Stop();
+                graph.Destroy();
+            }
+
+            StopRecording();
+
+            TrimSavedFramesForExport(1);
+
+            string safeName = clip.name.Replace("/", "_").Replace("\\", "_");
+            string fileName = Path.Combine(baseFolder, safeName + ".vmd");
+            fileName = fileName.Replace("\\", "/");
+            Directory.CreateDirectory(Path.GetDirectoryName(fileName));
+            SaveVMD(safeName, fileName);
+
+            UnityEngine.Debug.Log($"Exported clip to {fileName}");
+        }
+
+        UnityEngine.Debug.Log($"Export finished. Exported {clips.Length} clips to {baseFolder}");
+    }
+
+    /// <summary>
+    /// Trim saved frames for exported animations:
+    /// - Drop the first `dropFirstFrames` frames (commonly 1)
+    /// - Trim trailing frames after last detected change (bones or morphs)
+    /// This modifies: frameNumberSaved, positionDictionarySaved, rotationDictionarySaved, morphRecorderSaved.ValueList, visitableDictionary.
+    /// </summary>
+    /// <param name="dropFirstFrames"></param>
+    private void TrimSavedFramesForExport(int dropFirstFrames = 1)
+    {
+        try
+        {
+            if (frameNumberSaved <= 0) return;
+
+            int total = frameNumberSaved;
+            int dropStart = Mathf.Clamp(dropFirstFrames, 0, total); // how many frames to drop from start
+            if (dropStart >= total)
+            {
+                frameNumberSaved = 0;
+                foreach (var k in positionDictionarySaved.Keys.ToList()) positionDictionarySaved[k] = new List<Vector3>();
+                foreach (var k in rotationDictionarySaved.Keys.ToList()) rotationDictionarySaved[k] = new List<Quaternion>();
+                if (morphRecorderSaved != null)
+                {
+                    foreach (var driver in morphRecorderSaved.MorphDrivers.Values)
+                    {
+                        driver.ValueList = new List<(float value, bool enabled)>();
+                    }
+                }
+                visitableDictionary = new Dictionary<int, bool>();
+                return;
+            }
+
+            float posEps = 0.001f;       // position difference threshold (meters after amplifier)
+            float rotAngleEps = 0.1f;    // rotation angle threshold in degrees
+            float morphEps = 0.001f;     // morph value difference threshold
+
+            Vector3 GetPositionSafe(BoneNames b, int idx)
+            {
+                if (!positionDictionarySaved.ContainsKey(b)) return Vector3.zero;
+                var list = positionDictionarySaved[b];
+                if (list == null || list.Count == 0) return Vector3.zero;
+                if (idx < 0) return list[0];
+                if (idx < list.Count) return list[idx];
+                return list[list.Count - 1];
+            }
+            Quaternion GetRotationSafe(BoneNames b, int idx)
+            {
+                if (!rotationDictionarySaved.ContainsKey(b)) return Quaternion.identity;
+                var list = rotationDictionarySaved[b];
+                if (list == null || list.Count == 0) return Quaternion.identity;
+                if (idx < 0) return list[0];
+                if (idx < list.Count) return list[idx];
+                return list[list.Count - 1];
+            }
+            float GetMorphSafe(MorphRecorder.MorphDriver driver, int idx)
+            {
+                if (driver == null) return 0f;
+                var list = driver.ValueList;
+                if (list == null || list.Count == 0) return 0f;
+                if (idx < 0) return list[0].value;
+                if (idx < list.Count) return list[idx].value;
+                return list[list.Count - 1].value;
+            }
+
+            int lastNonEmpty = -1;
+
+            for (int i = total - 1; i >= dropStart + 1; i--)
+            {
+                bool frameChanged = false;
+
+                foreach (var boneName in positionDictionarySaved.Keys)
+                {
+                    Vector3 pCur = GetPositionSafe(boneName, i);
+                    Vector3 pPrev = GetPositionSafe(boneName, i - 1);
+                    if (Vector3.Distance(pCur, pPrev) > posEps)
+                    {
+                        frameChanged = true;
+                        break;
+                    }
+
+                    Quaternion rCur = GetRotationSafe(boneName, i);
+                    Quaternion rPrev = GetRotationSafe(boneName, i - 1);
+                    if (Quaternion.Angle(rCur, rPrev) > rotAngleEps)
+                    {
+                        frameChanged = true;
+                        break;
+                    }
+                }
+
+                if (frameChanged)
+                {
+                    lastNonEmpty = i;
+                    break;
+                }
+
+                if (morphRecorderSaved != null)
+                {
+                    foreach (var driver in morphRecorderSaved.MorphDrivers.Values)
+                    {
+                        float cur = GetMorphSafe(driver, i);
+                        float prev = GetMorphSafe(driver, i - 1);
+                        if (Mathf.Abs(cur - prev) > morphEps)
+                        {
+                            frameChanged = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (frameChanged)
+                {
+                    lastNonEmpty = i;
+                    break;
+                }
+            }
+
+            int keepStart = dropStart;
+            int keepEnd = (lastNonEmpty == -1) ? keepStart : lastNonEmpty;
+            if (keepEnd < keepStart) keepEnd = keepStart;
+
+            int keepCount = keepEnd - keepStart + 1; // number of frames to keep
+
+            // Rebuild bone lists (skip dropStart, take keepCount)
+            foreach (var boneName in positionDictionarySaved.Keys.ToList())
+            {
+                var oldPos = positionDictionarySaved[boneName] ?? new List<Vector3>();
+                var oldRot = rotationDictionarySaved[boneName] ?? new List<Quaternion>();
+
+                List<Vector3> newPos = new List<Vector3>();
+                List<Quaternion> newRot = new List<Quaternion>();
+
+                int availablePos = oldPos.Count;
+                int availableRot = oldRot.Count;
+
+                for (int j = 0; j < keepCount; j++)
+                {
+                    int idx = keepStart + j;
+                    if (idx < availablePos) newPos.Add(oldPos[idx]);
+                    else if (availablePos > 0) newPos.Add(oldPos[availablePos - 1]); // pad last
+                    else newPos.Add(Vector3.zero);
+
+                    if (idx < availableRot) newRot.Add(oldRot[idx]);
+                    else if (availableRot > 0) newRot.Add(oldRot[availableRot - 1]); // pad last
+                    else newRot.Add(Quaternion.identity);
+                }
+
+                positionDictionarySaved[boneName] = newPos;
+                rotationDictionarySaved[boneName] = newRot;
+            }
+
+            // Rebuild morph lists (skip dropStart, take keepCount)
+            if (morphRecorderSaved != null)
+            {
+                foreach (var kv in morphRecorderSaved.MorphDrivers.ToList())
+                {
+                    var driver = kv.Value;
+                    var oldVals = driver.ValueList ?? new List<(float value, bool enabled)>();
+                    List<(float value, bool enabled)> newVals = new List<(float value, bool enabled)>();
+
+                    int available = oldVals.Count;
+                    for (int j = 0; j < keepCount; j++)
+                    {
+                        int idx = keepStart + j;
+                        if (idx < available) newVals.Add(oldVals[idx]);
+                        else if (available > 0) newVals.Add(oldVals[available - 1]); // pad last
+                        else newVals.Add((0f, false));
+                    }
+                    driver.ValueList = newVals;
+                }
+            }
+
+            var newVis = new Dictionary<int, bool>();
+            foreach (var kv in visitableDictionary)
+            {
+                int originalKey = kv.Key;
+                if (originalKey >= keepStart && originalKey <= keepEnd)
+                {
+                    int newKey = originalKey - keepStart;
+                    newVis[newKey] = kv.Value;
+                }
+            }
+            visitableDictionary = newVis;
+
+            frameNumberSaved = keepCount;
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogWarning("TrimSavedFramesForExport error: " + ex.Message);
+        }
     }
 
     //裏で正規化されたモデル
@@ -901,26 +1199,6 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
                 morphDriversTemp.Add(morphName, MorphDrivers[morphName]);
             }
             MorphDrivers = morphDriversTemp;
-        }
-
-        public void DisableIntron()
-        {
-            foreach (string morphName in MorphDrivers.Keys)
-            {
-                for (int i = 0; i < MorphDrivers[morphName].ValueList.Count; i++)
-                {
-                    //情報がなければ次へ
-                    if (MorphDrivers[morphName].ValueList.Count == 0) { continue; }
-                    //今、前、後が同じなら不必要なので無効化
-                    if (i > 0
-                        && i < MorphDrivers[morphName].ValueList.Count - 1
-                        && floatCompare(MorphDrivers[morphName].ValueList[i].value, MorphDrivers[morphName].ValueList[i - 1].value)
-                        && floatCompare(MorphDrivers[morphName].ValueList[i].value, MorphDrivers[morphName].ValueList[i + 1].value))
-                    {
-                        MorphDrivers[morphName].ValueList[i] = (MorphDrivers[morphName].ValueList[i].value, false);
-                    }
-                }
-            }
         }
 
         bool floatCompare(float f1, float f2)

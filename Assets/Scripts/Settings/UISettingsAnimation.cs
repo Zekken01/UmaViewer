@@ -14,6 +14,9 @@ public class UISettingsAnimation : MonoBehaviour
     public Slider SpeedSlider;
     public Button VMDButton;
 
+    public Toggle ExportEachToggle;
+    public Button ExportEachButton;
+
     internal void UpdateAnimationInfo(UmaContainerCharacter umaContainer)
     {
         if (umaContainer.OverrideController["clip_2"].name != "clip_2")
@@ -28,6 +31,33 @@ public class UISettingsAnimation : MonoBehaviour
                 ProgressText.text = string.Format("{0} / {1}", ToFrameFormat(normalizedTime * AnimeClip.length, AnimeClip.frameRate), ToFrameFormat(AnimeClip.length, AnimeClip.frameRate));
                 ProgressSlider.SetValueWithoutNotify(normalizedTime);
             }
+        }
+    }
+
+    private void Awake()
+    {
+        if (ExportEachButton != null)
+        {
+            ExportEachButton.onClick.RemoveAllListeners();
+            ExportEachButton.onClick.AddListener(() =>
+            {
+                if (UmaViewerUI.Instance != null)
+                {
+                    UmaViewerUI.Instance.ExportControllerClipsFromCurrent();
+                }
+            });
+        }
+
+        if (ExportEachToggle != null)
+        {
+            ExportEachToggle.onValueChanged.RemoveAllListeners();
+            ExportEachToggle.onValueChanged.AddListener((val) =>
+            {
+                if (UmaViewerUI.Instance != null)
+                {
+                    UmaViewerUI.Instance.SetRecorderExportEach(val);
+                }
+            });
         }
     }
 

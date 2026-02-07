@@ -183,6 +183,139 @@ public class UmaViewerUI : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Set the recorder's ExportEachClipSeparately flag on the current UMA instance (if recorder exists).
+    /// Called from UI toggle.
+    /// </summary>
+    /// <param name="val"></param>
+    public void SetRecorderExportEach(bool val)
+    {
+        var container = Builder.CurrentUMAContainer;
+        if (container == null) return;
+
+        var rootbone = container.transform.Find("Position");
+        if (rootbone == null) return;
+
+        if (rootbone.gameObject.TryGetComponent(out UnityHumanoidVMDRecorder recorder))
+        {
+            recorder.ExportEachClipSeparately = val;
+            // Optionally set the ExportAnimator to ensure correct animator is used
+            recorder.ExportAnimator = container.UmaAnimator;
+        }
+    }
+
+    /// <summary>
+    /// Called from UI to export all clips referenced by the current controller as separate .vmd files.
+    /// If a recorder component doesn't exist on the UMA root, we create a temporary one for the export and destroy it after.
+    /// </summary>
+    public void ExportControllerClipsFromCurrent()
+    {
+        var container = Builder.CurrentUMAContainer;
+        if (!container || container.IsMini)
+        {
+            ShowMessage("Need Normal UMA to export controller clips.", UIMessageType.Error);
+            return;
+        }
+
+        var rootbone = container.transform.Find("Position");
+        if (rootbone == null)
+        {
+            ShowMessage("Position root not found on UMA.", UIMessageType.Error);
+            return;
+        }
+
+        UnityHumanoidVMDRecorder recorder = null;
+        bool createdTempRecorder = false;
+
+        if (!rootbone.gameObject.TryGetComponent(out recorder))
+        {
+            // create a temporary recorder, initialize and use it
+            recorder = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
+            recorder.Initialize();
+            createdTempRecorder = true;
+        }
+
+        recorder.ExportEachClipSeparately = true;
+        recorder.ExportAnimator = container.UmaAnimator;
+
+        ShowMessage("Starting export of controller clips (this may take a while)...", UIMessageType.Success);
+
+        try
+        {
+            recorder.ExportControllerClipsToVMD(null, Config.Instance.VmdKeyReductionLevel);
+            ShowMessage("Export finished.", UIMessageType.Success);
+            UnityEngine.Debug.Log($"VMD exports saved to: {Path.GetFullPath(UnityEngine.Application.dataPath + UnityHumanoidVMDRecorder.FileSavePath)}");
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Export failed: {ex.Message}", UIMessageType.Error);
+            UnityEngine.Debug.LogError($"ExportControllerClipsFromCurrent error: {ex}");
+        }
+        finally
+        {
+            if (createdTempRecorder && recorder != null)
+            {
+                Destroy(recorder);
+            }
+        }
+    }
+
+    public void RecordVMD()
+    {
+        var container = Builder.CurrentUMAContainer;
+        var camera = Builder.AnimationCamera;
+        var buttonText = AnimationSettings.VMDButton.GetComponentInChildren<TextMeshProUGUI>();
+
+        if (!container || container.IsMini)
+        {
+            buttonText.text = string.Format("<color=#FF0000>{0}</color>", "Need Normal UMA");
+            return;
+        }
+
+        // If ExportEach toggle is on, use the batch export flow instead of the single-clip SaveVMD flow.
+        if (AnimationSettings != null && AnimationSettings.ExportEachToggle != null && AnimationSettings.ExportEachToggle.isOn)
+        {
+            // Use the new batch export helper (which will create/destroy a temp recorder if needed)
+            ExportControllerClipsFromCurrent();
+            return;
+        }
+
+        var rootbone = container.transform.Find("Position");
+        if (rootbone.gameObject.TryGetComponent(out UnityHumanoidVMDRecorder recorder))
+        {
+            if (recorder.IsRecording)
+            {
+                if (camera.enabled)
+                {
+                    var cameraRecorder = camera.GetComponent<UnityCameraVMDRecorder>();
+                    cameraRecorder.StopRecording();
+                    cameraRecorder.SaveVMD();
+                }
+                recorder.StopRecording();
+                buttonText.text = "Saving";
+                recorder.SaveVMD(container.name, Config.Instance.VmdKeyReductionLevel);
+                buttonText.text = "Record VMD";
+                ShowMessage($"VMD is saved in {Path.GetFullPath(UnityEngine.Application.dataPath + UnityHumanoidVMDRecorder.FileSavePath)}", UIMessageType.Success);
+            }
+        }
+        else
+        {
+            var newRecorder = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
+            newRecorder.Initialize();
+            if (!newRecorder.IsRecording)
+            {
+                if (camera.enabled)
+                {
+                    var cameraRecorder = camera.gameObject.AddComponent<UnityCameraVMDRecorder>();
+                    cameraRecorder.Initialize();
+                    cameraRecorder.StartRecording();
+                }
+                newRecorder.StartRecording();
+                buttonText.text = "Recording...";
+            }
+        }
+    }
+
     public void LoadModelPanels()
     {
         var containerG = Instantiate(UmaContainerPrefab, AnimationSetList.content).GetComponent<UmaUIContainer>();
@@ -1029,54 +1162,6 @@ public class UmaViewerUI : MonoBehaviour
         foreach (var panel in TogglableFacials)
         {
             panel.SetActive(panel == go);
-        }
-    }
-
-    public void RecordVMD()
-    {
-        var container = Builder.CurrentUMAContainer;
-        var camera = Builder.AnimationCamera;
-        var buttonText = AnimationSettings.VMDButton.GetComponentInChildren<TextMeshProUGUI>();
-
-        if (!container || container.IsMini)
-        {
-            buttonText.text = string.Format("<color=#FF0000>{0}</color>", "Need Normal UMA");
-            return;
-        }
-
-        var rootbone = container.transform.Find("Position");
-        if (rootbone.gameObject.TryGetComponent(out UnityHumanoidVMDRecorder recorder))
-        {
-            if (recorder.IsRecording)
-            {
-                if (camera.enabled)
-                {
-                    var cameraRecorder = camera.GetComponent<UnityCameraVMDRecorder>();
-                    cameraRecorder.StopRecording();
-                    cameraRecorder.SaveVMD();
-                }
-                recorder.StopRecording();
-                buttonText.text = "Saving";
-                recorder.SaveVMD(container.name, Config.Instance.VmdKeyReductionLevel);
-                buttonText.text = "Record VMD";
-                ShowMessage($"VMD is saved in {Path.GetFullPath(Application.dataPath + UnityHumanoidVMDRecorder.FileSavePath)}", UIMessageType.Success);
-            }
-        }
-        else
-        {
-            var newRecorder = rootbone.gameObject.AddComponent<UnityHumanoidVMDRecorder>();
-            newRecorder.Initialize();
-            if (!newRecorder.IsRecording)
-            {
-                if (camera.enabled)
-                {
-                    var cameraRecorder = camera.gameObject.AddComponent<UnityCameraVMDRecorder>();
-                    cameraRecorder.Initialize();
-                    cameraRecorder.StartRecording();
-                }
-                newRecorder.StartRecording();
-                buttonText.text = "Recording...";
-            }
         }
     }
 
