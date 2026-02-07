@@ -757,7 +757,7 @@ public class UnityHumanoidVMDRecorder : MonoBehaviour
             {
                 graph.Stop();
                 graph.Destroy();
-
+                animator.Rebind();
                 animator.applyRootMotion = originalApplyRootMotion;
             }
 
