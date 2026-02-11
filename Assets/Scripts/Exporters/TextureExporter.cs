@@ -40,7 +40,7 @@ public class TextureExporter
         {
             foreach (Material mat in renderer.sharedMaterials)
             {
-                //»ñµÃ²ÄÖÊµÄËùÓÐÊôÐÔÃû£¬Èç¹û¸ÄÊôÐÔÃû¶ÔÓ¦µÄÊÇÌùÍ¼£¬ÌáÈ¡¸ÃÌùÍ¼
+                // Get all property names of the material; if a property is a texture, export that texture
                 Shader mat_shader = mat.shader;
                 int p_num = mat_shader.GetPropertyCount();
                 for (int i = 0; i < p_num; i++)
@@ -85,7 +85,7 @@ public class TextureExporter
                 }
             }
         }
-        Debug.Log("ÌáÈ¡³É¹¦");
+        Debug.Log("Export Successful");
         return textureNames.ToArray();
     }
 }

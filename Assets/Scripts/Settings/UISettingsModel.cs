@@ -2,6 +2,8 @@
 using SFB;
 #endif
 
+using System.IO;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -121,6 +123,53 @@ public class UISettingsModel : MonoBehaviour
             }
         }
 
+#else
+        UmaViewerUI.Instance.ShowMessage("Not supported on this platform", UIMessageType.Warning);
+#endif
+    }
+
+    public void ExportAllProps()
+    {
+#if !UNITY_ANDROID || UNITY_EDITOR
+        var paths = StandaloneFileBrowser.OpenFolderPanel("Select Folder", Config.Instance.MainPath, false);
+        if (paths != null && paths.Length > 0 && !string.IsNullOrEmpty(paths[0]))
+        {
+            var outDir = paths[0];
+            var props = UmaViewerMain.Instance.AbList.Where(a => a.Key.Contains("pfb_chr_prop") && !a.Key.Contains("clothes")).Select(a => a.Value).ToList();
+            int count = 0;
+            foreach (var entry in props)
+            {
+                UmaContainerProp propContainer = null;
+                GameObject containerGO = null;
+                try
+                {
+                    containerGO = new GameObject(Path.GetFileName(entry.Name));
+                    propContainer = containerGO.AddComponent<UmaContainerProp>();
+                    propContainer.LoadProp(entry);
+
+                    var folderName = Path.GetFileNameWithoutExtension(entry.Name);
+                    var propDir = Path.Combine(outDir, folderName);
+                    Directory.CreateDirectory(propDir);
+                    var outPath = Path.Combine(propDir, folderName + ".pmx");
+                    ModelExporter.ExportModel(propContainer, outPath);
+                    count++;
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"Export prop failed: {entry.Name} -> {ex.Message}");
+                }
+                finally
+                {
+                    if (containerGO)
+                    {
+                        if (Application.isEditor) DestroyImmediate(containerGO);
+                        else Destroy(containerGO);
+                    }
+                }
+            }
+
+            UmaViewerUI.Instance.ShowMessage($"{count} props exported", UIMessageType.Success);
+        }
 #else
         UmaViewerUI.Instance.ShowMessage("Not supported on this platform", UIMessageType.Warning);
 #endif
